@@ -110,7 +110,7 @@ ARG MODEL_TYPE=flux1-dev
 WORKDIR /comfyui
 
 # Create necessary directories upfront
-RUN mkdir -p models/checkpoints models/vae models/unet models/clip models/text_encoders models/diffusion_models models/model_patches models/pulid models/insightface/models
+RUN mkdir -p models/checkpoints models/vae models/unet models/clip models/text_encoders models/diffusion_models models/model_patches models/pulid models/insightface/models/antelopev2
 
 # Download FLUX models
 RUN if [ "$MODEL_TYPE" = "flux1-dev" ]; then \
@@ -125,7 +125,7 @@ RUN wget -q -O models/pulid/pulid_flux_v0.9.1.safetensors \
       https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors && \
     wget -q -O /tmp/antelopev2.zip \
       https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip && \
-    unzip -q /tmp/antelopev2.zip -d models/insightface/models && \
+    unzip -q -j /tmp/antelopev2.zip -d models/insightface/models/antelopev2 && \
     rm /tmp/antelopev2.zip
 
 
