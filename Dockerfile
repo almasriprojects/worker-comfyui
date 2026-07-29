@@ -20,11 +20,13 @@ ENV PYTHONUNBUFFERED=1
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
 # Install Python, git and other necessary tools
+# NOTE: added `unzip` here (needed later to extract the antelopev2 face model archive)
 RUN apt-get update && apt-get install -y \
     python3.12 \
     python3.12-venv \
     git \
     wget \
+    unzip \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
@@ -62,6 +64,13 @@ RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
       uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
     fi
 
+# --- NEW: Install PuLID-Flux custom node for face-identity-consistent generations ---
+# This must happen BEFORE the "install every custom node's requirements.txt" loop
+# below, so PuLID's own Python dependencies get picked up automatically by that loop.
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/balazik/ComfyUI-PuLID-Flux.git
+# --- END NEW ---
+
 # comfy-cli installs ComfyUI into its own workspace venv (/comfyui/.venv), but
 # start.sh launches ComfyUI with /opt/venv's python. That mismatch leaves the
 # launch venv missing ComfyUI's runtime deps (e.g. sqlalchemy, pulled in by
@@ -90,10 +99,8 @@ RUN cd /comfyui && timeout 300 python main.py --quick-test-for-ci --cpu
 
 # Change working directory to ComfyUI
 WORKDIR /comfyui
-
 # Support for the network volume
 ADD src/extra_model_paths.yaml ./
-
 # Go back to the root
 WORKDIR /
 
@@ -118,6 +125,7 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # Set the default command to run when starting the container
 CMD ["/start.sh"]
 
+
 # Stage 2: Download models
 FROM base AS downloader
 
@@ -129,7 +137,8 @@ ARG MODEL_TYPE=flux1-dev-fp8
 WORKDIR /comfyui
 
 # Create necessary directories upfront
-RUN mkdir -p models/checkpoints models/vae models/unet models/clip models/text_encoders models/diffusion_models models/model_patches
+# NOTE: added models/pulid and models/insightface/models/antelopev2 for the new PuLID node
+RUN mkdir -p models/checkpoints models/vae models/unet models/clip models/text_encoders models/diffusion_models models/model_patches models/pulid models/insightface/models/antelopev2
 
 # Download checkpoints/vae/unet/clip models to include in image based on model type
 RUN if [ "$MODEL_TYPE" = "sdxl" ]; then \
@@ -137,35 +146,48 @@ RUN if [ "$MODEL_TYPE" = "sdxl" ]; then \
       wget -q -O models/vae/sdxl_vae.safetensors https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors && \
       wget -q -O models/vae/sdxl-vae-fp16-fix.safetensors https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/main/sdxl_vae.safetensors; \
     fi
-
 RUN if [ "$MODEL_TYPE" = "sd3" ]; then \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/checkpoints/sd3_medium_incl_clips_t5xxlfp8.safetensors https://huggingface.co/stabilityai/stable-diffusion-3-medium/resolve/main/sd3_medium_incl_clips_t5xxlfp8.safetensors; \
     fi
-
 RUN if [ "$MODEL_TYPE" = "flux1-schnell" ]; then \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/unet/flux1-schnell.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors && \
       wget -q -O models/clip/clip_l.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors && \
       wget -q -O models/clip/t5xxl_fp8_e4m3fn.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors && \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors; \
     fi
-
+# NOTE: switched default MODEL_TYPE build arg (see bottom) to "flux1-dev" instead of
+# "flux1-dev-fp8" — PuLID needs the separate unet/clip/vae split files this block
+# downloads, not the single merged checkpoint file flux1-dev-fp8 provides below.
 RUN if [ "$MODEL_TYPE" = "flux1-dev" ]; then \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/unet/flux1-dev.safetensors https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors && \
       wget -q -O models/clip/clip_l.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors && \
       wget -q -O models/clip/t5xxl_fp8_e4m3fn.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors && \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors; \
     fi
-
 RUN if [ "$MODEL_TYPE" = "flux1-dev-fp8" ]; then \
       wget -q -O models/checkpoints/flux1-dev-fp8.safetensors https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors; \
     fi
-
 RUN if [ "$MODEL_TYPE" = "z-image-turbo" ]; then \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/text_encoders/qwen_3_4b.safetensors https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors && \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/diffusion_models/z_image_turbo_bf16.safetensors https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors && \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors && \
       wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors; \
     fi
+
+# --- NEW: Download PuLID-Flux identity model + face-detection models ---
+# These are downloaded unconditionally (not tied to MODEL_TYPE) since PuLID is
+# an add-on capability, not a base checkpoint choice.
+# NOTE: if either wget below returns a 404 during build, the file has likely
+# moved — check https://github.com/balazik/ComfyUI-PuLID-Flux for the current
+# exact download link and swap it in here.
+RUN wget -q -O models/pulid/pulid_flux_v0.9.1.safetensors \
+      https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors && \
+    wget -q -O /tmp/antelopev2.zip \
+      https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip && \
+    unzip -q /tmp/antelopev2.zip -d models/insightface/models/antelopev2 && \
+    rm /tmp/antelopev2.zip
+# --- END NEW ---
+
 
 # Stage 3: Final image
 FROM base AS final
