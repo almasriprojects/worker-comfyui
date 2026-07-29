@@ -67,7 +67,7 @@ RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/balazik/ComfyUI-PuLID-Flux.git
 
 # Install Python dependencies required specifically by PuLID, InsightFace, & EVA-CLIP
-RUN uv pip install insightface onnxruntime-gpu facexlib eva-clip-pytorch ftfy regex
+RUN uv pip install insightface onnxruntime-gpu facexlib open_clip_torch ftfy regex
 
 # Mirror ComfyUI & custom node dependencies into /opt/venv
 RUN uv pip install -r /comfyui/requirements.txt \
@@ -110,7 +110,7 @@ ARG MODEL_TYPE=flux1-dev
 WORKDIR /comfyui
 
 # Create necessary directories upfront
-RUN mkdir -p models/checkpoints models/vae models/unet models/clip models/text_encoders models/diffusion_models models/model_patches models/pulid models/insightface/models/antelopev2
+RUN mkdir -p models/checkpoints models/vae models/unet models/clip models/text_encoders models/diffusion_models models/model_patches models/pulid models/insightface/models
 
 # Download FLUX models
 RUN if [ "$MODEL_TYPE" = "flux1-dev" ]; then \
@@ -121,12 +121,11 @@ RUN if [ "$MODEL_TYPE" = "flux1-dev" ]; then \
     fi
 
 # Download PuLID-Flux identity model + antelopev2 face-detection models
-# Uses a flattened un-zip command to prevent extra nested folders
 RUN wget -q -O models/pulid/pulid_flux_v0.9.1.safetensors \
       https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors && \
     wget -q -O /tmp/antelopev2.zip \
       https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip && \
-    unzip -q -j /tmp/antelopev2.zip -d models/insightface/models/antelopev2 && \
+    unzip -q /tmp/antelopev2.zip -d models/insightface/models && \
     rm /tmp/antelopev2.zip
 
 
